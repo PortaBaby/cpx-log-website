@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+ <title>CPX Log Downloader</title>
+</head>
+<body>
+
+<h1>CPX Log Downloader</h1>
+
+<button onclick="connect()">Connect Device</button>
+<button onclick="downloadCSV()">Download Logs</button>
+
+<pre id="log"></pre>
+
+<script>
+let port;
+let reader;
+let logs = [];
+let collecting = false;
+
+function print(msg) {
+ document.getElementById("log").textContent += msg + "\n";
+}
+
+// CONNECT TO CPX
+async function connect() {
+ try {
+   port = await navigator.serial.requestPort();
+   await port.open({ baudRate: 115200 });
+
+   print("Connected to CPX");
+
+   const decoder = new TextDecoderStream();
+   port.readable.pipeTo(decoder.writable);
+   reader = decoder.readable.getReader();
+
+   readLoop();
+
+ } catch (e) {
+   print("Error: " + e);
+ }
+}
+
+// READ SERIAL DATA
+let buffer = "";
+
+async function readLoop() {
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += value;
+
+    let lines = buffer.split("\n");
+    buffer = lines.pop(); // keep incomplete line
+
+    for (let line of lines) {
+      line = line.trim();
+      if (!line) continue;
+
+      print(line);
+
+      // START
+      if (line.includes("=== AUTO DUMP ===")) {
+        collecting = true;
+        logs = [];
+        continue;
+      }
+
+      // END
+      if (line.includes("=== END DUMP ===")) {
+        collecting = false;
+        print("✅ Logs captured: " + logs.length);
+        continue;
+      }
+
+      // DATA
+      if (collecting) {
+        if (line.includes("EventNum") || line === "NO_LOGS") continue;
+
+        const parts = line.split(",");
+
+        if (parts.length === 4) {
+          logs.push(parts);
+        }
+      }
+    }
+  }
+}
+
+// DOWNLOAD CSV
+function downloadCSV() {
+ if (logs.length === 0) {
+   alert("No logs found. Connect first.");
+   return;
+ }
+
+ let csv = "EventNum,Trigger,Reason,TimeMs\n";
+ logs.forEach(r => csv += r.join(",") + "\n");
+
+ const blob = new Blob([csv], { type: "text/csv" });
+ const url = URL.createObjectURL(blob);
+
+ const a = document.createElement("a");
+ a.href = url;
+ a.download = "CPX_LOG.csv";
+ a.click();
+
+ URL.revokeObjectURL(url);
+
+//Send Clear command to CPX
+if(port && port.writable){
+  const writer = port.writable.getWriter();
+  writer.write(new TextEncoder().encode("CLEAR\n"));
+  writer.releaseLock();
+}
+}
+</script>
+
+</body>
+</html>

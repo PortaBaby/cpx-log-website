@@ -15,14 +15,21 @@
 <script>
 let port;
 let reader;
+
 let logs = [];
 let collecting = false;
+let currentBoard = "";
 
+// ----------------------------
+// UI PRINT
+// ----------------------------
 function print(msg) {
   document.getElementById("log").textContent += msg + "\n";
 }
 
-// CONNECT TO CPX
+// ----------------------------
+// CONNECT
+// ----------------------------
 async function connect() {
   try {
     port = await navigator.serial.requestPort();
@@ -41,55 +48,79 @@ async function connect() {
   }
 }
 
-// READ SERIAL DATA
+// ----------------------------
+// SERIAL READ LOOP
+// ----------------------------
 let buffer = "";
 
 async function readLoop() {
+
   while (true) {
+
     const { value, done } = await reader.read();
     if (done) break;
 
     buffer += value;
 
     let lines = buffer.split("\n");
-    buffer = lines.pop(); // keep incomplete line
+    buffer = lines.pop();
 
     for (let line of lines) {
+
       line = line.trim();
       if (!line) continue;
 
       print(line);
 
-      // START OF DUMP
+      // ----------------------------
+      // START DUMP
+      // ----------------------------
       if (line.includes("=== AUTO DUMP ===")) {
         collecting = true;
         logs = [];
+        currentBoard = "";
         continue;
       }
 
-      // END OF DUMP
+      // ----------------------------
+      // BOARD ID
+      // ----------------------------
+      if (line.startsWith("Board:")) {
+        currentBoard = line.replace("Board:", "").trim();
+        continue;
+      }
+
+      // ----------------------------
+      // END DUMP
+      // ----------------------------
       if (line.includes("=== END DUMP ===")) {
         collecting = false;
         print("✅ Logs captured: " + logs.length);
         continue;
       }
 
-      // HEADER SKIP
+      // ----------------------------
+      // DATA HEADER SKIP
+      // ----------------------------
       if (line.includes("EventNum") || line.includes("Trigger")) {
         continue;
       }
 
-      // DATA
+      // ----------------------------
+      // DATA ROWS
+      // ----------------------------
       if (collecting) {
+
         const parts = line.split(",");
 
-        // Arduino now sends 3 columns:
-        // EventNum,Trigger,Time(D/H/M)
+        // Expect: EventNum,Trigger,Time
         if (parts.length >= 3) {
+
           logs.push([
-            parts[0],
-            parts[1],
-            parts[2]
+            currentBoard,
+            parts[0], // EventNum
+            parts[1], // Trigger
+            parts[2]  // Time
           ]);
         }
       }
@@ -97,17 +128,20 @@ async function readLoop() {
   }
 }
 
+// ----------------------------
 // DOWNLOAD CSV
+// ----------------------------
 function downloadCSV() {
+
   if (logs.length === 0) {
     alert("No logs found. Connect first.");
     return;
   }
 
-  let csv = "EventNum,Trigger,Time(D/H/M)\n";
+  let csv = "Board,EventNum,Trigger,Time(D/H/M)\n";
 
-  logs.forEach(r => {
-    csv += r.join(",") + "\n";
+  logs.forEach(row => {
+    csv += row.join(",") + "\n";
   });
 
   const blob = new Blob([csv], { type: "text/csv" });
@@ -120,7 +154,7 @@ function downloadCSV() {
 
   URL.revokeObjectURL(url);
 
-  // Send CLEAR command to CPX after download
+  // OPTIONAL: send clear command to CPX
   if (port && port.writable) {
     const writer = port.writable.getWriter();
     writer.write(new TextEncoder().encode("CLEAR\n"));

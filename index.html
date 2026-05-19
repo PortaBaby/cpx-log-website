@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
- <title>CPX Log Downloader</title>
+  <title>CPX Log Downloader</title>
 </head>
 <body>
 
@@ -19,26 +19,26 @@ let logs = [];
 let collecting = false;
 
 function print(msg) {
- document.getElementById("log").textContent += msg + "\n";
+  document.getElementById("log").textContent += msg + "\n";
 }
 
 // CONNECT TO CPX
 async function connect() {
- try {
-   port = await navigator.serial.requestPort();
-   await port.open({ baudRate: 115200 });
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
 
-   print("Connected to CPX");
+    print("Connected to CPX");
 
-   const decoder = new TextDecoderStream();
-   port.readable.pipeTo(decoder.writable);
-   reader = decoder.readable.getReader();
+    const decoder = new TextDecoderStream();
+    port.readable.pipeTo(decoder.writable);
+    reader = decoder.readable.getReader();
 
-   readLoop();
+    readLoop();
 
- } catch (e) {
-   print("Error: " + e);
- }
+  } catch (e) {
+    print("Error: " + e);
+  }
 }
 
 // READ SERIAL DATA
@@ -60,28 +60,37 @@ async function readLoop() {
 
       print(line);
 
-      // START
+      // START OF DUMP
       if (line.includes("=== AUTO DUMP ===")) {
         collecting = true;
         logs = [];
         continue;
       }
 
-      // END
+      // END OF DUMP
       if (line.includes("=== END DUMP ===")) {
         collecting = false;
         print("✅ Logs captured: " + logs.length);
         continue;
       }
 
+      // HEADER SKIP
+      if (line.includes("EventNum") || line.includes("Trigger")) {
+        continue;
+      }
+
       // DATA
       if (collecting) {
-        if (line.includes("EventNum") || line === "NO_LOGS") continue;
-
         const parts = line.split(",");
 
-        if (parts.length === 4) {
-          logs.push(parts);
+        // Arduino now sends 3 columns:
+        // EventNum,Trigger,Time(D/H/M)
+        if (parts.length >= 3) {
+          logs.push([
+            parts[0],
+            parts[1],
+            parts[2]
+          ]);
         }
       }
     }
@@ -90,30 +99,33 @@ async function readLoop() {
 
 // DOWNLOAD CSV
 function downloadCSV() {
- if (logs.length === 0) {
-   alert("No logs found. Connect first.");
-   return;
- }
+  if (logs.length === 0) {
+    alert("No logs found. Connect first.");
+    return;
+  }
 
- let csv = "EventNum,Trigger,Reason,TimeMs\n";
- logs.forEach(r => csv += r.join(",") + "\n");
+  let csv = "EventNum,Trigger,Time(D/H/M)\n";
 
- const blob = new Blob([csv], { type: "text/csv" });
- const url = URL.createObjectURL(blob);
+  logs.forEach(r => {
+    csv += r.join(",") + "\n";
+  });
 
- const a = document.createElement("a");
- a.href = url;
- a.download = "CPX_LOG.csv";
- a.click();
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
 
- URL.revokeObjectURL(url);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "CPX_LOG.csv";
+  a.click();
 
-//Send Clear command to CPX
-if(port && port.writable){
-  const writer = port.writable.getWriter();
-  writer.write(new TextEncoder().encode("CLEAR\n"));
-  writer.releaseLock();
-}
+  URL.revokeObjectURL(url);
+
+  // Send CLEAR command to CPX after download
+  if (port && port.writable) {
+    const writer = port.writable.getWriter();
+    writer.write(new TextEncoder().encode("CLEAR\n"));
+    writer.releaseLock();
+  }
 }
 </script>
 
